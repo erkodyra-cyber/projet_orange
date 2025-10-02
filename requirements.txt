@@ -1,0 +1,23 @@
+# --- API & Web ---
+fastapi
+uvicorn[standard]
+python-dotenv
+
+# --- NLP & RAG ---
+sentence-transformers
+faiss-cpu
+
+# --- LLMs ---
+requests   # pour appeler l’API Mistral
+
+# --- Utils ---
+numpy
+pickle5   # compatible Python 3.8+
+pypdf     # extraction texte PDF
+python-multipart  # si tu veux un jour uploader des fichiers via l'API
+
+# --- Dev / Debug ---
+ipython
+jupyter
+
+

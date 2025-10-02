@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <title>Chatbot Vault POC</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 2rem; }
+    .card { border: 1px solid #ddd; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; }
+    input, button, textarea { padding: 8px; border-radius: 8px; border: 1px solid #ccc; }
+    button { cursor: pointer; }
+    .pill { font-size: 12px; padding: 4px 8px; border-radius: 999px; background: #f2f2f2; }
+    .ok { background: #e0ffe8; }
+    .err { background: #ffe0e0; }
+    pre { white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+
+  <h1>Chatbot (Vault Auth POC)</h1>
+
+  <div class="card" id="auth-card">
+    <h2>Authentification</h2>
+
+    <div class="row">
+      <div>
+        <label>Utilisateur</label><br/>
+        <input id="username" placeholder="alice" />
+      </div>
+      <div>
+        <label>Mot de passe</label><br/>
+        <input id="password" type="password" placeholder="password" />
+      </div>
+    </div>
+
+    <div class="row" style="margin-top:8px">
+      <button id="signup">Créer un compte (POC)</button>
+      <button id="login">Se connecter</button>
+      <button id="whoami">Qui suis-je ?</button>
+      <button id="logout">Se déconnecter</button>
+    </div>
+
+    <p>Statut: <span id="auth-status" class="pill">déconnecté</span></p>
+    <p>Policies: <span id="policies"></span></p>
+  </div>
+
+  <div class="card">
+    <h2>Poser une question</h2>
+    <textarea id="question" rows="3" style="width:100%" placeholder="Ex: c'est quoi le Security Navigator ?"></textarea>
+    <div class="row" style="margin-top:8px">
+      <button id="ask">Envoyer</button>
+      <span id="ask-status" class="pill"></span>
+    </div>
+    <h3>Réponse</h3>
+    <pre id="answer"></pre>
+    <div>
+      <span class="pill" id="agents"></span>
+      <span class="pill" id="trace"></span>
+      <span class="pill" id="notice"></span>
+    </div>
+  </div>
+
+  <script>
+    const ORCH_BASE = window.location.origin; // suppose que tu sers ce fichier via l'orchestrateur
+    const $ = (id) => document.getElementById(id);
+
+    function setStatus(ok, msg) {
+      const el = $("auth-status");
+      el.className = "pill " + (ok ? "ok" : "err");
+      el.textContent = msg;
+    }
+
+    function token() { return window.localStorage.getItem("vault_token") || ""; }
+    function setToken(t) {
+      if (t) window.localStorage.setItem("vault_token", t);
+      else window.localStorage.removeItem("vault_token");
+      setStatus(!!t, t ? "connecté" : "déconnecté");
+    }
+
+    async function postJSON(path, body, useAuth=false) {
+      const headers = { "Content-Type": "application/json" };
+      if (useAuth && token()) headers["Authorization"] = "Bearer " + token();
+      const res = await fetch(ORCH_BASE + path, { method: "POST", headers, body: JSON.stringify(body) });
+      const data = await res.json().catch(()=>({}));
+      if (!res.ok) throw data;
+      return data;
+    }
+    async function getJSON(path, useAuth=false) {
+      const headers = {};
+      if (useAuth && token()) headers["Authorization"] = "Bearer " + token();
+      const res = await fetch(ORCH_BASE + path, { headers });
+      const data = await res.json().catch(()=>({}));
+      if (!res.ok) throw data;
+      return data;
+    }
+
+    // Boutons
+    $("signup").onclick = async () => {
+      const username = $("username").value.trim();
+      const password = $("password").value;
+      try {
+        await postJSON("/auth/signup", { username, password }); // policies par défaut: ["default"]
+        alert("Compte créé. Connecte-toi maintenant.");
+      } catch (e) {
+        console.error(e);
+        alert("Signup KO: " + JSON.stringify(e));
+      }
+    };
+
+    $("login").onclick = async () => {
+      const username = $("username").value.trim();
+      const password = $("password").value;
+      try {
+        const res = await postJSON("/auth/login", { username, password });
+        setToken(res.token);
+        $("policies").textContent = (res.policies || []).join(", ");
+      } catch (e) {
+        console.error(e);
+        setToken("");
+        alert("Login KO: " + JSON.stringify(e));
+      }
+    };
+
+    $("whoami").onclick = async () => {
+      try {
+        const me = await getJSON("/auth/whoami", true);
+        $("policies").textContent = (me.policies || []).join(", ");
+        setStatus(true, "connecté");
+      } catch (e) {
+        console.error(e);
+        setStatus(false, "déconnecté");
+      }
+    };
+
+    $("logout").onclick = () => {
+      setToken("");
+      $("policies").textContent = "";
+    };
+
+    $("ask").onclick = async () => {
+      const q = $("question").value.trim();
+      $("ask-status").textContent = "envoi…";
+      $("answer").textContent = "";
+      $("agents").textContent = "";
+      $("trace").textContent = "";
+      $("notice").textContent = "";
+
+      try {
+        const res = await postJSON("/ask", { question: q, top_k: 10, initial_k: 200 }, true);
+        $("answer").textContent = res.answer || "";
+        $("agents").textContent = "agents: " + (res.used_agents || []).join(", ");
+        $("trace").textContent = "trace: " + (res.trace_id || "");
+        $("notice").textContent = res.notice ? ("notice: " + res.notice) : "";
+        $("ask-status").textContent = "OK";
+      } catch (e) {
+        console.error(e);
+        $("ask-status").textContent = "erreur";
+        $("answer").textContent = JSON.stringify(e, null, 2);
+      }
+    };
+
+    // Init
+    setStatus(!!token(), token() ? "connecté" : "déconnecté");
+  </script>
+</body>
+</html>

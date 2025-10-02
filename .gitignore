@@ -1,0 +1,29 @@
+# --- secrets & env
+*.env
+.env
+orchestrator/.env
+agent_*/.env
+**/.env.*
+
+# --- Vault (ne jamais pousser l'état ni les logs/snapshots)
+vault/data/
+vault/audit.log
+vault/*.snap
+
+# --- Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+
+# --- Node/Front (si tu as du Node)
+node_modules/
+dist/
+build/
+
+# --- IDE/OS
+.vscode/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <title>Admin — Vault (POC)</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    :root { --b:#0b5fff; --g:#16a34a; --r:#ef4444; --bg:#f8fafc;}
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);margin:0;padding:24px}
+    h1{margin:0 0 16px}
+    .grid{display:grid;gap:16px;grid-template-columns:1fr}
+    @media(min-width:900px){.grid{grid-template-columns:320px 1fr}}
+    .card{background:#fff;border:1px solid #e5e7eb;border-radius:14px;box-shadow:0 1px 2px rgba(0,0,0,.03);padding:16px}
+    label{display:block;font-size:12px;color:#334155;margin-bottom:6px}
+    input,button{border:1px solid #cbd5e1;border-radius:10px;padding:10px 12px;font-size:14px}
+    input{width:100%}
+    button{cursor:pointer;background:#fff}
+    .btn{display:inline-flex;align-items:center;gap:8px}
+    .btn-primary{background:var(--b);color:#fff;border-color:transparent}
+    .btn-green{background:var(--g);color:#fff;border-color:transparent}
+    .btn-danger{background:var(--r);color:#fff;border-color:transparent}
+    .row{display:flex;gap:8px;flex-wrap:wrap}
+    .pill{display:inline-block;background:#eef2ff;color:#1e293b;padding:4px 8px;border-radius:999px;font-size:12px}
+    table{width:100%;border-collapse:collapse;font-size:14px}
+    th,td{border-bottom:1px solid #e5e7eb;padding:10px;text-align:left}
+    .muted{color:#64748b}
+    .ok{background:#dcfce7}
+    .err{background:#fee2e2}
+    .note{font-size:12px;color:#475569;margin-top:8px}
+    .foot{margin-top:16px;font-size:12px;color:#64748b}
+    .sp{display:inline-block;width:12px;height:12px;border-radius:999px;background:#e5e7eb;animation:spin 1s linear infinite;border:2px solid #e5e7eb;border-top-color:#94a3b8}
+    @keyframes spin{to{transform:rotate(360deg)}}
+  </style>
+</head>
+<body>
+  <h1>Admin Vault — Gestion des comptes (POC)</h1>
+  <div class="grid">
+    <!-- Panneau Admin -->
+    <div class="card">
+      <h3>Connexion admin</h3>
+      <label>ADMIN_UI_SECRET (.env serveur)</label>
+      <input id="admin_secret" placeholder="••••••••" />
+      <div class="row" style="margin-top:8px">
+        <button class="btn btn-primary" id="btnList"><span class="sp" id="spList" style="display:none"></span> Lister les utilisateurs</button>
+      </div>
+      <p class="note">Ce secret n’est <b>pas</b> stocké : il est utilisé uniquement pour appeler les endpoints /admin/* côté serveur.</p>
+      <div class="foot">Endpoints utilisés : <code>GET /admin/users</code>, <code>POST /admin/grant-sensitive</code>, <code>POST /auth/signup</code></div>
+    </div>
+
+    <!-- Panneau Création -->
+    <div class="card">
+      <h3>Créer un utilisateur</h3>
+      <div class="row">
+        <div style="flex:1;min-width:200px">
+          <label>Nom d’utilisateur</label>
+          <input id="new_user" placeholder="alice" />
+        </div>
+        <div style="flex:1;min-width:200px">
+          <label>Mot de passe</label>
+          <input id="new_pass" type="password" placeholder="password" />
+        </div>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button class="btn btn-green" id="btnCreate"><span class="sp" id="spCreate" style="display:none"></span> Créer (policy: default)</button>
+      </div>
+      <p class="note">La création donne uniquement la policy <code>default</code>. Pour l’accès sensible, utilisez le bouton “Donner sensitive-reader” dans la liste.</p>
+    </div>
+  </div>
+
+  <!-- Liste Utilisateurs -->
+  <div class="card" style="margin-top:16px">
+    <div class="row" style="justify-content:space-between;align-items:center">
+      <h3 style="margin:0">Utilisateurs</h3>
+      <span id="status" class="pill">prêt</span>
+    </div>
+    <div id="usersWrap" class="muted" style="margin-top:8px">Clique sur “Lister les utilisateurs”.</div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const show = (id, v) => ($(id).style.display = v ? "" : "none");
+    const ORCH = window.location.origin;
+
+    function toast(ok, msg) {
+      const st = $("status");
+      st.className = "pill " + (ok ? "ok" : "err");
+      st.textContent = msg;
+      setTimeout(()=>{ st.className="pill"; st.textContent="prêt"; }, 3000);
+    }
+
+    async function getJSON(path) {
+      const res = await fetch(ORCH + path);
+      const data = await res.json().catch(()=>({}));
+      if (!res.ok) throw data;
+      return data;
+    }
+    async function postJSON(path, body) {
+      const res = await fetch(ORCH + path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      const data = await res.json().catch(()=>({}));
+      if (!res.ok) throw data;
+      return data;
+    }
+
+    function renderUsers(list) {
+      if (!list || !list.data || !Array.isArray(list.data.keys)) {
+        $("usersWrap").innerHTML = "<p class='muted'>Aucun utilisateur (ou réponse inattendue).</p>";
+        return;
+      }
+      const keys = list.data.keys.sort();
+      if (!keys.length) {
+        $("usersWrap").innerHTML = "<p class='muted'>Aucun utilisateur.</p>";
+        return;
+      }
+      const rows = keys.map(u => `
+        <tr>
+          <td><b>${u}</b></td>
+          <td class="muted">default</td>
+          <td>
+            <div class="row">
+              <button class="btn btn-primary" onclick="grantSensitive('${u}')">Donner <code>sensitive-reader</code></button>
+            </div>
+          </td>
+        </tr>
+      `).join("");
+      $("usersWrap").innerHTML = `
+        <table>
+          <thead>
+            <tr><th>Utilisateur</th><th>Policies (affichage POC)</th><th>Actions</th></tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>`;
+    }
+
+    // Actions
+    $("btnList").onclick = async () => {
+      const secret = $("admin_secret").value.trim();
+      if (!secret) return toast(false, "Renseigne ADMIN_UI_SECRET");
+      show("spList", true);
+      try {
+        const data = await getJSON(`/admin/users?admin_secret=${encodeURIComponent(secret)}`);
+        renderUsers(data);
+        toast(true, "Liste chargée");
+      } catch (e) {
+        console.error(e);
+        toast(false, "Erreur /admin/users");
+      } finally {
+        show("spList", false);
+      }
+    };
+
+    $("btnCreate").onclick = async () => {
+      const username = $("new_user").value.trim();
+      const password = $("new_pass").value;
+      if (!username || !password) return toast(false, "Nom + mot de passe requis");
+      show("spCreate", true);
+      try {
+        await postJSON("/auth/signup", { username, password });
+        toast(true, `Utilisateur créé: ${username}`);
+        $("new_user").value = ""; $("new_pass").value = "";
+      } catch (e) {
+        console.error(e);
+        toast(false, "Erreur /auth/signup");
+      } finally {
+        show("spCreate", false);
+      }
+    };
+
+    window.grantSensitive = async (username) => {
+      const secret = $("admin_secret").value.trim();
+      if (!secret) return toast(false, "Renseigne ADMIN_UI_SECRET");
+      try {
+        await postJSON("/admin/grant-sensitive", { admin_secret: secret, username });
+        toast(true, `Policy sensitive-reader accordée à ${username}`);
+      } catch (e) {
+        console.error(e);
+        toast(false, "Erreur /admin/grant-sensitive");
+      }
+    };
+  </script>
+</body>
+</html>
